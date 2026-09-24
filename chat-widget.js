@@ -747,7 +747,7 @@ function mount() {
       </div>
       <div class="ai-chat-modelbar">
         <select class="ai-model-select" aria-label="Выбор модели">
-          <option value="together">Together AI (бесплатный ключ)</option>
+          <option value="public">Публичный API (бесплатно, без ключа)</option>
           <option value="groq">Groq (нужен ключ)</option>
           <option value="yandex">YandexGPT (нужен ключ)</option>
         </select>
@@ -799,7 +799,7 @@ function mount() {
   let busy = false;
   let stopRequested = false;
   let index = null;
-  let currentProvider = localStorage.getItem(LS_API_PROVIDER) || "together";
+  let currentProvider = localStorage.getItem(LS_API_PROVIDER) || "public";
   let apiKey = localStorage.getItem(LS_API_KEY) || "";
 
   modelSelect.value = currentProvider;
@@ -945,34 +945,42 @@ function mount() {
     }
 
     try {
-      if (provider === "together") {
-        // Together AI API (бесплатный tier)
-        if (!providerKey) {
-          throw new Error("Для Together AI нужен бесплатный API ключ. Получите его за 1 минуту на https://together.ai/ (бесплатно $25 кредитов).");
+      if (provider === "public") {
+        // Публичный Hugging Face API без ключа
+        try {
+          const response = await fetch(API_CONFIG.publicHuggingFace, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              inputs: messages[messages.length - 1].content,
+              parameters: {
+                max_new_tokens: 700,
+                temperature: 0.4,
+                top_p: 0.9,
+                return_full_text: false
+              }
+            })
+          });
+
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Public API error: ${response.status} - ${error}`);
+          }
+
+          const data = await response.json();
+          if (Array.isArray(data) && data[0]?.generated_text) {
+            return data[0].generated_text;
+          } else if (data?.generated_text) {
+            return data.generated_text;
+          } else {
+            throw new Error("Неожиданный формат ответа от API");
+          }
+        } catch (error) {
+          console.error("Public API Error:", error);
+          throw new Error("Публичный API временно недоступен. Попробуйте позже.");
         }
-
-        const response = await fetch(API_CONFIG.togetherUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${providerKey}`
-          },
-          body: JSON.stringify({
-            model: "meta-llama/Llama-3-8b-chat-hf",
-            messages: messages,
-            max_tokens: 700,
-            temperature: 0.4,
-            top_p: 0.9
-          })
-        });
-
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`Together AI error: ${response.status} - ${error}`);
-        }
-
-        const data = await response.json();
-        return data?.choices?.[0]?.message?.content || "";
       } else if (provider === "groq") {
         // Groq API
         if (!providerKey) {
