@@ -1,0 +1,16 @@
+# Зависимости
+node_modules/
+
+# Логи и временные файлы
+*.log
+tmp/
+temp/
+
+# Системные файлы ОС
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Локальные секреты и окружение
+.env
+.env.*
