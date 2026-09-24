@@ -6,6 +6,8 @@
 const API_CONFIG = {
   // Используем бесплатный API Hugging Face для простоты
   baseUrl: "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct",
+  // Альтернативная бесплатная модель (меньше, но стабильнее)
+  fallbackUrl: "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
   // Или можно использовать YandexGPT если пользователь предоставит ключ
   alternativeUrl: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 };
@@ -943,36 +945,67 @@ function mount() {
 
     try {
       if (provider === "huggingface") {
-        // Бесплатный Hugging Face API
-        const response = await fetch(API_CONFIG.baseUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(providerKey ? { "Authorization": `Bearer ${providerKey}` } : {})
-          },
-          body: JSON.stringify({
-            inputs: messages[messages.length - 1].content,
-            parameters: {
-              max_new_tokens: 700,
-              temperature: 0.4,
-              top_p: 0.9,
-              return_full_text: false
-            }
-          })
-        });
+        // Бесплатный Hugging Face API с автоматическим переключением на запасную модель
+        let response;
+        let data;
+        let usedUrl = API_CONFIG.baseUrl;
 
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`Hugging Face API error: ${response.status} - ${error}`);
-        }
+        try {
+          response = await fetch(usedUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(providerKey ? { "Authorization": `Bearer ${providerKey}` } : {})
+            },
+            body: JSON.stringify({
+              inputs: messages[messages.length - 1].content,
+              parameters: {
+                max_new_tokens: 700,
+                temperature: 0.4,
+                top_p: 0.9,
+                return_full_text: false
+              }
+            })
+          });
 
-        const data = await response.json();
-        if (Array.isArray(data) && data[0]?.generated_text) {
-          return data[0].generated_text;
-        } else if (data?.generated_text) {
-          return data.generated_text;
-        } else {
-          throw new Error("Неожиданный формат ответа от API");
+          if (!response.ok) {
+            // Пробуем запасную модель если основная недоступна
+            console.log("Основная модель недоступна, пробуем запасную...");
+            usedUrl = API_CONFIG.fallbackUrl;
+            response = await fetch(usedUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(providerKey ? { "Authorization": `Bearer ${providerKey}` } : {})
+              },
+              body: JSON.stringify({
+                inputs: messages[messages.length - 1].content,
+                parameters: {
+                  max_new_tokens: 700,
+                  temperature: 0.4,
+                  top_p: 0.9,
+                  return_full_text: false
+                }
+              })
+            });
+          }
+
+          if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Hugging Face API error: ${response.status} - ${error}`);
+          }
+
+          data = await response.json();
+          if (Array.isArray(data) && data[0]?.generated_text) {
+            return data[0].generated_text;
+          } else if (data?.generated_text) {
+            return data.generated_text;
+          } else {
+            throw new Error("Неожиданный формат ответа от API");
+          }
+        } catch (error) {
+          console.error("Hugging Face API Error:", error);
+          throw new Error(`Бесплатный API暂时 недоступен. Попробуйте позже или используйте платный API с ключом.`);
         }
       } else if (provider === "yandex") {
         // YandexGPT API
