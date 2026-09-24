@@ -1,43 +1,16 @@
-import { CreateMLCEngine, prebuiltAppConfig } from "https://esm.run/@mlc-ai/web-llm@0.2.84";
+// Убрали WebLLM для работы на GitHub Pages, используем облачный API
 
-/* ==================== МОДЕЛИ ==================== */
+/* ==================== ОБЛАЧНЫЙ API ==================== */
 
-// Предпочтения по качеству (используются только те, что реально есть в web-llm).
-const PREFERRED = [
-  "Qwen2.5-7B-Instruct-q4f16_1-MLC",
-  "Qwen2.5-3B-Instruct-q4f16_1-MLC",
-  "Llama-3.2-3B-Instruct-q4f16_1-MLC",
-  "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
-  "Llama-3.2-1B-Instruct-q4f16_1-MLC",
-];
-
-// Человекочитаемые имена для select.
-const NICE_NAMES = {
-  "Qwen2.5-7B-Instruct-q4f16_1-MLC": "Qwen 2.5 7B — лучший ответ, нужен GPU ~6 ГБ",
-  "Qwen2.5-3B-Instruct-q4f16_1-MLC": "Qwen 2.5 3B — баланс, GPU ~3 ГБ",
-  "Llama-3.2-3B-Instruct-q4f16_1-MLC": "Llama 3.2 3B — альтернатива",
-  "Qwen2.5-1.5B-Instruct-q4f16_1-MLC": "Qwen 2.5 1.5B — слабый ПК",
-  "Llama-3.2-1B-Instruct-q4f16_1-MLC": "Llama 3.2 1B — самый быстрый",
+// Конфигурация для работы с облачным API
+const API_CONFIG = {
+  // Используем бесплатный API Hugging Face для простоты
+  baseUrl: "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct",
+  // Или можно использовать YandexGPT если пользователь предоставит ключ
+  alternativeUrl: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 };
 
-function availableModels() {
-  const list = (prebuiltAppConfig && prebuiltAppConfig.model_list) || [];
-  const byId = new Map(list.map((m) => [m.model_id, m]));
-  const preferred = PREFERRED.filter((id) => byId.has(id));
-  if (preferred.length >= 2) return preferred;
-
-  // Если предпочтительных почти нет — берём обычные LLM-модели по убыванию VRAM.
-  return list
-    .filter((m) => !m.model_type && m.vram_required_MB && m.vram_required_MB <= 6500)
-    .sort((a, b) => b.vram_required_MB - a.vram_required_MB)
-    .slice(0, 5)
-    .map((m) => m.model_id);
-}
-
-function modelLabel(id) {
-  if (NICE_NAMES[id]) return NICE_NAMES[id].split(" — ")[0];
-  return String(id).replace(/-q4f16_1-MLC$/, "").replace(/-MLC$/, "");
-}
+const LS_API_KEY = "ai-navigator-api-key";
 
 /* ==================== ПОИСК ПО МЕТОДИЧКЕ (RAG) ==================== */
 
@@ -529,6 +502,30 @@ const css = `
     cursor: pointer;
   }
   .ai-chat-modelbar button:hover { background: #264271; }
+  .ai-api-key-section {
+    display: none;
+    padding: 8px 12px;
+    background: #0e1a31;
+    border-bottom: 1px solid #26385c;
+  }
+  .ai-api-key-section.show { display: block; }
+  .ai-api-key-section input {
+    width: 100%;
+    background: #0b1220;
+    color: #cfe0ff;
+    border: 1px solid #26385c;
+    border-radius: 9px;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+  .ai-api-key-section input:focus { border-color: #4f8cff; }
+  .ai-api-key-section .hint {
+    font-size: 11px;
+    color: #9fb0d0;
+    margin-top: 4px;
+  }
   .ai-chat-progress { height: 3px; background: #0b1428; }
   .ai-chat-progress span {
     display: block;
@@ -694,7 +691,7 @@ const css = `
 /* ==================== ХРАНЕНИЕ ==================== */
 
 const LS_HISTORY = "ai-navigator-history-v1";
-const LS_MODEL = "ai-navigator-model-v1";
+const LS_API_PROVIDER = "ai-navigator-api-provider";
 
 function loadHistory() {
   try {
@@ -747,8 +744,15 @@ function mount() {
         <button class="ai-icon-btn ai-chat-close" type="button" aria-label="Закрыть">×</button>
       </div>
       <div class="ai-chat-modelbar">
-        <select class="ai-model-select" aria-label="Выбор модели"></select>
-        <button class="ai-reload" type="button" title="Перезагрузить выбранную модель">Сменить</button>
+        <select class="ai-model-select" aria-label="Выбор модели">
+          <option value="huggingface">Hugging Face (бесплатно)</option>
+          <option value="yandex">YandexGPT (нужен ключ)</option>
+        </select>
+        <button class="ai-reload" type="button" title="Настройки API">⚙️</button>
+      </div>
+      <div class="ai-api-key-section">
+        <input type="password" class="ai-api-key-input" placeholder="Введите API ключ (YandexGPT или Hugging Face)">
+        <div class="hint">Ключ сохраняется локально в браузере</div>
       </div>
       <div class="ai-chat-progress"><span></span></div>
       <div class="ai-chat-messages"></div>
@@ -784,30 +788,18 @@ function mount() {
   const icStop = sendBtn.querySelector(".ic-stop");
   const modelSelect = root.querySelector(".ai-model-select");
   const reloadBtn = root.querySelector(".ai-reload");
+  const apiKeySection = root.querySelector(".ai-api-key-section");
+  const apiKeyInput = root.querySelector(".ai-api-key-input");
 
-  const models = availableModels();
   let history = loadHistory();
-  let engine = null;
-  let loadedModel = "";
   let loading = false;
   let busy = false;
   let stopRequested = false;
   let index = null;
+  let currentProvider = localStorage.getItem(LS_API_PROVIDER) || "huggingface";
+  let apiKey = localStorage.getItem(LS_API_KEY) || "";
 
-  if (!models.length) {
-    setStatus("Модели недоступны");
-    modelSelect.disabled = true;
-    reloadBtn.disabled = true;
-  } else {
-    const saved = localStorage.getItem(LS_MODEL);
-    for (const id of models) {
-      const opt = document.createElement("option");
-      opt.value = id;
-      opt.textContent = NICE_NAMES[id] || modelLabel(id);
-      if (id === saved) opt.selected = true;
-      modelSelect.appendChild(opt);
-    }
-  }
+  modelSelect.value = currentProvider;
 
   /* ---------- служебное ---------- */
 
@@ -816,12 +808,27 @@ function mount() {
     status.title = text;
   }
 
+  function saveApiKey() {
+    const key = apiKeyInput.value.trim();
+    if (key) {
+      localStorage.setItem(LS_API_KEY, key);
+      apiKey = key;
+    }
+  }
+
+  function loadApiKey() {
+    const saved = localStorage.getItem(LS_API_KEY);
+    if (saved) {
+      apiKeyInput.value = saved;
+      apiKey = saved;
+    }
+  }
+
   function setBusyUI(on) {
     busy = on;
-    sendBtn.classList.toggle("stop", on);
-    sendBtn.setAttribute("aria-label", on ? "Остановить генерацию" : "Отправить");
-    icSend.style.display = on ? "none" : "";
-    icStop.style.display = on ? "" : "none";
+    sendBtn.disabled = on;
+    sendBtn.setAttribute("aria-label", on ? "Генерация..." : "Отправить");
+    // Для облачного API прерывание не поддерживается
   }
 
   function atBottom() {
@@ -911,7 +918,7 @@ function mount() {
   function rerenderMessages() {
     messagesEl.innerHTML = "";
     addMsg(
-      "Привет! Я читаю эту методичку и отвечаю по её разделам. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
+      "Привет! Я ИИ-навигатор по методичке. Работаю через облачный API, поэтому доступен на GitHub Pages. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
       "assistant"
     );
     for (const m of history) {
@@ -924,101 +931,114 @@ function mount() {
     renderChips();
   }
 
-  /* ---------- загрузка модели ---------- */
+  /* ---------- облачный API ---------- */
 
-  async function createEngine(modelId) {
-    return CreateMLCEngine(modelId, {
-      initProgressCallback: (report) => {
-        const pct = Math.max(0, Math.min(100, Math.round((report.progress || 0) * 100)));
-        bar.style.width = pct + "%";
-        setStatus(report.text ? `${modelLabel(modelId)} · ${pct}%` : `Загрузка ${pct}%`);
-      },
-      // Отключаем кэширование для GitHub Pages
-      cachedWeights: false,
-    });
-  }
+  async function callCloudAPI(messages) {
+    const provider = modelSelect.value;
+    const providerKey = apiKey || localStorage.getItem(LS_API_KEY);
 
-  async function loadModel(preferredId) {
-    if (!models.length) return null;
-    const order = [];
-    const wanted = preferredId || modelSelect.value || localStorage.getItem(LS_MODEL);
-    if (wanted && models.includes(wanted)) order.push(wanted);
-    for (const id of models) if (!order.includes(id)) order.push(id);
-
-    let lastError = null;
-    for (const id of order) {
-      try {
-        setStatus(`Загрузка ${modelLabel(id)}…`);
-        const e = await createEngine(id);
-        engine = e;
-        loadedModel = id;
-        modelSelect.value = id;
-        try {
-          localStorage.setItem(LS_MODEL, id);
-        } catch {
-          /* ignore */
-        }
-        bar.style.width = "100%";
-        setStatus(`Готов · ${modelLabel(id)}`);
-        return e;
-      } catch (err) {
-        lastError = err;
-        console.warn("Модель не подошла:", id, err);
-        engine = null;
-      }
+    if (provider === "yandex" && !providerKey) {
+      throw new Error("Для YandexGPT нужен API ключ. Получите его на https://cloud.yandex.ru/ и введите в настройках.");
     }
-    throw lastError || new Error("Нет доступных моделей");
+
+    try {
+      if (provider === "huggingface") {
+        // Бесплатный Hugging Face API
+        const response = await fetch(API_CONFIG.baseUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(providerKey ? { "Authorization": `Bearer ${providerKey}` } : {})
+          },
+          body: JSON.stringify({
+            inputs: messages[messages.length - 1].content,
+            parameters: {
+              max_new_tokens: 700,
+              temperature: 0.4,
+              top_p: 0.9,
+              return_full_text: false
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Hugging Face API error: ${response.status} - ${error}`);
+        }
+
+        const data = await response.json();
+        if (Array.isArray(data) && data[0]?.generated_text) {
+          return data[0].generated_text;
+        } else if (data?.generated_text) {
+          return data.generated_text;
+        } else {
+          throw new Error("Неожиданный формат ответа от API");
+        }
+      } else if (provider === "yandex") {
+        // YandexGPT API
+        const response = await fetch(API_CONFIG.alternativeUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Api-Key ${providerKey}`,
+            "x-folder-id": providerKey.split(":")[1] || "b1g...id" // Нужен folder ID
+          },
+          body: JSON.stringify({
+            modelUri: `gpt://${providerKey.split(":")[1] || "b1g...id"}/yandexgpt/latest`,
+            completionOptions: {
+              maxTokens: 700,
+              temperature: 0.4,
+              topP: 0.9
+            },
+            messages: messages.map(m => ({
+              role: m.role === "system" ? "system" : m.role,
+              text: m.content
+            }))
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`YandexGPT API error: ${response.status} - ${error}`);
+        }
+
+        const data = await response.json();
+        return data?.result?.alternatives?.[0]?.message?.text || "";
+      }
+    } catch (error) {
+      console.error("API Error:", error);
+      throw error;
+    }
   }
 
   async function ensureEngine(force = false) {
-    if (engine && !force) return engine;
-    if (loading) return engine;
-    if (!navigator.gpu) {
-      addMsg(
-        "В этом браузере нет WebGPU. Откройте сайт в Chrome или Edge (через запустить.bat, а не двойным кликом по index.html).",
-        "assistant",
-        "error"
-      );
-      setStatus("WebGPU недоступен");
-      return null;
-    }
-
-    // Проверка на GitHub Pages
-    const isGitHubPages = window.location.hostname.includes('github.io');
-    if (isGitHubPages) {
-      addMsg(
-        "⚠️ ВНИМАНИЕ: GitHub Pages имеет ограничения для загрузки больших моделей через WebGPU. Для полной работы ИИ-навигатора используйте локальный запуск через файл запустить.bat. Попытка загрузить модель онлайн...",
-        "assistant",
-        "error"
-      );
-    }
-
+    if (loading) return true;
     loading = true;
     sendBtn.disabled = true;
+
     try {
-      if (force && engine) {
-        try {
-          await engine.unload();
-        } catch {
-          /* ignore */
-        }
-        engine = null;
+      const provider = modelSelect.value;
+      localStorage.setItem(LS_API_PROVIDER, provider);
+
+      if (provider === "yandex" && !apiKey) {
+        apiKeySection.classList.add("show");
+        setStatus("Нужен API ключ для YandexGPT");
+        addMsg("Для использования YandexGPT введите API ключ в настройках (кнопка ⚙️). Получить ключ можно на https://cloud.yandex.ru/", "assistant", "error");
+        return false;
       }
-      await loadModel(modelSelect.value);
-      addMsg(`Модель ${modelLabel(loadedModel)} загружена. Спрашивайте по методичке.`, "assistant");
+
+      setStatus(`Готов · ${provider === "huggingface" ? "Hugging Face" : "YandexGPT"}`);
+      addMsg(`Подключено к ${provider === "huggingface" ? "Hugging Face (бесплатно)" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
+      return true;
     } catch (err) {
       console.error(err);
-      engine = null;
-      const errorMsg = isGitHubPages
-        ? `На GitHub Pages модель не загружается из-за ограничений платформы. Для работы ИИ-навигатора используйте локальный запуск: скачайте репозиторий и запустите файл запустить.bat. Локальная версия работает полностью офлайн после первого запуска.`
-        : `Не удалось загрузить модель (${err.message || err}). Нужны Chrome/Edge и интернет на первый запуск — модель качается один раз и дальше работает офлайн.`;
-      addMsg(errorMsg, "assistant", "error");
-      setStatus("Ошибка загрузки");
+      addMsg(`Ошибка подключения: ${err.message}`, "assistant", "error");
+      setStatus("Ошибка подключения");
+      return false;
     } finally {
       loading = false;
       if (!busy) sendBtn.disabled = false;
     }
-    return engine;
   }
 
   /* ---------- генерация ---------- */
@@ -1027,12 +1047,12 @@ function mount() {
     const question = String(text || "").trim();
     if (!question || busy) return;
 
-    await ensureEngine();
-    if (!engine) return;
+    const engineReady = await ensureEngine();
+    if (!engineReady) return;
 
     if (!index) {
       index = new SearchIndex(collectChunks());
-      setStatus(`Готов · ${modelLabel(loadedModel)} · разделов: ${index.chunks.length}`);
+      setStatus(`Готов · разделов: ${index.chunks.length}`);
     }
 
     setBusyUI(true);
@@ -1058,32 +1078,19 @@ function mount() {
         { role: "user", content: buildUserTurn(question, retrieval) },
       ];
 
-      const stream = await engine.chat.completions.create({
-        messages,
-        stream: true,
-        temperature: 0.4,
-        top_p: 0.9,
-        max_tokens: 700,
-        enable_thinking: false,
-      });
+      // Используем облачный API вместо локального движка
+      reply = await callCloudAPI(messages);
 
       bubble.textContent = "";
       bubble.classList.remove("pending");
-
-      for await (const chunk of stream) {
-        if (stopRequested) break;
-        const delta = chunk.choices?.[0]?.delta?.content || "";
-        if (!delta) continue;
-        reply += delta;
-        bubble.textContent = reply;
-        scrollDown();
-      }
+      bubble.textContent = reply;
+      scrollDown();
     } catch (err) {
       console.error(err);
       if (!reply) {
         bubble.classList.add("error");
         bubble.classList.remove("pending", "md");
-        bubble.textContent = `Ошибка ответа: ${err.message || err}. Попробуйте ещё раз или смените модель.`;
+        bubble.textContent = `Ошибка ответа: ${err.message || err}. Попробуйте ещё раз или смените провайдера.`;
         setStatus("Ошибка");
         setBusyUI(false);
         sendBtn.disabled = false;
@@ -1095,7 +1102,7 @@ function mount() {
     if (!reply.trim()) {
       bubble.classList.remove("md");
       bubble.classList.add("pending");
-      bubble.textContent = stopRequested ? "Остановлено." : "Модель не ответила. Попробуйте переформулировать вопрос.";
+      bubble.textContent = stopRequested ? "Остановлено." : "API не ответил. Попробуйте переформулировать вопрос.";
     } else {
       bubble.innerHTML = renderMarkdown(reply);
       history.push({ role: "assistant", content: reply });
@@ -1104,7 +1111,7 @@ function mount() {
       if (!/источник/i.test(reply)) addSources(retrieval.sources);
     }
 
-    setStatus(`Готов · ${modelLabel(loadedModel)}`);
+    setStatus(`Готов · ${modelSelect.value === "huggingface" ? "Hugging Face" : "YandexGPT"}`);
     setBusyUI(false);
     sendBtn.disabled = false;
     input.focus();
@@ -1114,7 +1121,7 @@ function mount() {
     if (!busy) return;
     stopRequested = true;
     setStatus("Останавливаю…");
-    engine?.interruptGenerate?.().catch?.(() => {});
+    // Для облачного API прерывание не поддерживается
   }
 
   /* ---------- события ---------- */
@@ -1135,11 +1142,26 @@ function mount() {
 
   reloadBtn.addEventListener("click", () => {
     if (loading) return;
-    ensureEngine(true);
+    apiKeySection.classList.toggle("show");
+    if (apiKeySection.classList.contains("show")) {
+      loadApiKey();
+      apiKeyInput.focus();
+    }
+  });
+
+  apiKeyInput.addEventListener("input", () => {
+    saveApiKey();
   });
 
   modelSelect.addEventListener("change", () => {
-    if (engine && modelSelect.value !== loadedModel && !loading) ensureEngine(true);
+    currentProvider = modelSelect.value;
+    localStorage.setItem(LS_API_PROVIDER, currentProvider);
+    if (currentProvider === "yandex") {
+      apiKeySection.classList.add("show");
+      loadApiKey();
+    } else {
+      apiKeySection.classList.remove("show");
+    }
   });
 
   input.addEventListener("input", () => {
