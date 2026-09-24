@@ -747,8 +747,8 @@ function mount() {
       </div>
       <div class="ai-chat-modelbar">
         <select class="ai-model-select" aria-label="Выбор модели">
-          <option value="groq">Groq (бесплатно, быстро)</option>
-          <option value="together">Together AI (нужен ключ)</option>
+          <option value="together">Together AI (бесплатный ключ)</option>
+          <option value="groq">Groq (нужен ключ)</option>
           <option value="yandex">YandexGPT (нужен ключ)</option>
         </select>
         <button class="ai-reload" type="button" title="Настройки API">⚙️</button>
@@ -799,7 +799,7 @@ function mount() {
   let busy = false;
   let stopRequested = false;
   let index = null;
-  let currentProvider = localStorage.getItem(LS_API_PROVIDER) || "huggingface";
+  let currentProvider = localStorage.getItem(LS_API_PROVIDER) || "together";
   let apiKey = localStorage.getItem(LS_API_KEY) || "";
 
   modelSelect.value = currentProvider;
@@ -921,7 +921,7 @@ function mount() {
   function rerenderMessages() {
     messagesEl.innerHTML = "";
     addMsg(
-      "Привет! Я ИИ-навигатор по методичке. Работаю через облачный API Groq (бесплатно и быстро), поэтому доступен на GitHub Pages. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
+      "Привет! Я ИИ-навигатор по методичке. Для работы нужен бесплатный API ключ Together AI (получите за 1 минуту на https://together.ai/ - $25 бесплатных кредитов). Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
       "assistant"
     );
     for (const m of history) {
@@ -945,34 +945,10 @@ function mount() {
     }
 
     try {
-      if (provider === "groq") {
-        // Бесплатный Groq API с поддержкой CORS
-        const response = await fetch(API_CONFIG.groqUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${providerKey || "gsk_demo"}`
-          },
-          body: JSON.stringify({
-            model: "llama3-8b-8192",
-            messages: messages,
-            max_tokens: 700,
-            temperature: 0.4,
-            top_p: 0.9
-          })
-        });
-
-        if (!response.ok) {
-          const error = await response.text();
-          throw new Error(`Groq API error: ${response.status} - ${error}`);
-        }
-
-        const data = await response.json();
-        return data?.choices?.[0]?.message?.content || "";
-      } else if (provider === "together") {
-        // Together AI API
+      if (provider === "together") {
+        // Together AI API (бесплатный tier)
         if (!providerKey) {
-          throw new Error("Для Together AI нужен API ключ. Получите бесплатный на https://together.ai/");
+          throw new Error("Для Together AI нужен бесплатный API ключ. Получите его за 1 минуту на https://together.ai/ (бесплатно $25 кредитов).");
         }
 
         const response = await fetch(API_CONFIG.togetherUrl, {
@@ -993,6 +969,34 @@ function mount() {
         if (!response.ok) {
           const error = await response.text();
           throw new Error(`Together AI error: ${response.status} - ${error}`);
+        }
+
+        const data = await response.json();
+        return data?.choices?.[0]?.message?.content || "";
+      } else if (provider === "groq") {
+        // Groq API
+        if (!providerKey) {
+          throw new Error("Для Groq нужен API ключ. Получите бесплатный на https://console.groq.com/ (очень быстро).");
+        }
+
+        const response = await fetch(API_CONFIG.groqUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${providerKey}`
+          },
+          body: JSON.stringify({
+            model: "llama3-8b-8192",
+            messages: messages,
+            max_tokens: 700,
+            temperature: 0.4,
+            top_p: 0.9
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Groq API error: ${response.status} - ${error}`);
         }
 
         const data = await response.json();
@@ -1043,6 +1047,20 @@ function mount() {
       const provider = modelSelect.value;
       localStorage.setItem(LS_API_PROVIDER, provider);
 
+      if (provider === "together" && !apiKey) {
+        apiKeySection.classList.add("show");
+        setStatus("Нужен бесплатный API ключ Together AI");
+        addMsg("Для Together AI нужен бесплатный API ключ. Получите его за 1 минуту: https://together.ai/ (даёт $25 бесплатных кредитов - хватит надолго). Введите ключ в настройках (кнопка ⚙️).", "assistant", "error");
+        return false;
+      }
+
+      if (provider === "groq" && !apiKey) {
+        apiKeySection.classList.add("show");
+        setStatus("Нужен API ключ Groq");
+        addMsg("Для Groq нужен бесплатный API ключ. Получите его на https://console.groq.com/ (очень быстро). Введите ключ в настройках (кнопка ⚙️).", "assistant", "error");
+        return false;
+      }
+
       if (provider === "yandex" && !apiKey) {
         apiKeySection.classList.add("show");
         setStatus("Нужен API ключ для YandexGPT");
@@ -1050,15 +1068,8 @@ function mount() {
         return false;
       }
 
-      if (provider === "together" && !apiKey) {
-        apiKeySection.classList.add("show");
-        setStatus("Нужен API ключ для Together AI");
-        addMsg("Для использования Together AI введите бесплатный API ключ в настройках (кнопка ⚙️). Получить ключ можно на https://together.ai/", "assistant", "error");
-        return false;
-      }
-
-      setStatus(`Готов · ${provider === "groq" ? "Groq (бесплатно)" : provider === "together" ? "Together AI" : "YandexGPT"}`);
-      addMsg(`Подключено к ${provider === "groq" ? "Groq (бесплатно и быстро)" : provider === "together" ? "Together AI" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
+      setStatus(`Готов · ${provider === "groq" ? "Groq" : provider === "together" ? "Together AI" : "YandexGPT"}`);
+      addMsg(`Подключено к ${provider === "groq" ? "Groq" : provider === "together" ? "Together AI" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
       return true;
     } catch (err) {
       console.error(err);
