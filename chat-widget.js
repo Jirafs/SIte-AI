@@ -933,6 +933,8 @@ function mount() {
         bar.style.width = pct + "%";
         setStatus(report.text ? `${modelLabel(modelId)} · ${pct}%` : `Загрузка ${pct}%`);
       },
+      // Отключаем кэширование для GitHub Pages
+      cachedWeights: false,
     });
   }
 
@@ -981,6 +983,16 @@ function mount() {
       return null;
     }
 
+    // Проверка на GitHub Pages
+    const isGitHubPages = window.location.hostname.includes('github.io');
+    if (isGitHubPages) {
+      addMsg(
+        "⚠️ ВНИМАНИЕ: GitHub Pages имеет ограничения для загрузки больших моделей через WebGPU. Для полной работы ИИ-навигатора используйте локальный запуск через файл запустить.bat. Попытка загрузить модель онлайн...",
+        "assistant",
+        "error"
+      );
+    }
+
     loading = true;
     sendBtn.disabled = true;
     try {
@@ -997,11 +1009,10 @@ function mount() {
     } catch (err) {
       console.error(err);
       engine = null;
-      addMsg(
-        `Не удалось загрузить модель (${err.message || err}). Нужны Chrome/Edge и интернет на первый запуск — модель качается один раз и дальше работает офлайн.`,
-        "assistant",
-        "error"
-      );
+      const errorMsg = isGitHubPages
+        ? `На GitHub Pages модель не загружается из-за ограничений платформы. Для работы ИИ-навигатора используйте локальный запуск: скачайте репозиторий и запустите файл запустить.bat. Локальная версия работает полностью офлайн после первого запуска.`
+        : `Не удалось загрузить модель (${err.message || err}). Нужны Chrome/Edge и интернет на первый запуск — модель качается один раз и дальше работает офлайн.`;
+      addMsg(errorMsg, "assistant", "error");
       setStatus("Ошибка загрузки");
     } finally {
       loading = false;
