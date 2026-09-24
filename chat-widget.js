@@ -4,12 +4,12 @@
 
 // Конфигурация для работы с облачным API
 const API_CONFIG = {
-  // Используем бесплатный API Hugging Face для простоты
-  baseUrl: "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct",
-  // Альтернативная бесплатная модель (меньше, но стабильнее)
-  fallbackUrl: "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
-  // Или можно использовать YandexGPT если пользователь предоставит ключ
-  alternativeUrl: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+  // Используем бесплатный Groq API (поддерживает CORS, быстро, качественно)
+  groqUrl: "https://api.groq.com/openai/v1/chat/completions",
+  // Fallback на Together AI (тоже бесплатный tier)
+  togetherUrl: "https://api.together.xyz/v1/chat/completions",
+  // YandexGPT для платного варианта
+  yandexUrl: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 };
 
 const LS_API_KEY = "ai-navigator-api-key";
@@ -747,7 +747,8 @@ function mount() {
       </div>
       <div class="ai-chat-modelbar">
         <select class="ai-model-select" aria-label="Выбор модели">
-          <option value="huggingface">Hugging Face (бесплатно)</option>
+          <option value="groq">Groq (бесплатно, быстро)</option>
+          <option value="together">Together AI (нужен ключ)</option>
           <option value="yandex">YandexGPT (нужен ключ)</option>
         </select>
         <button class="ai-reload" type="button" title="Настройки API">⚙️</button>
@@ -920,7 +921,7 @@ function mount() {
   function rerenderMessages() {
     messagesEl.innerHTML = "";
     addMsg(
-      "Привет! Я ИИ-навигатор по методичке. Работаю через облачный API, поэтому доступен на GitHub Pages. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
+      "Привет! Я ИИ-навигатор по методичке. Работаю через облачный API Groq (бесплатно и быстро), поэтому доступен на GitHub Pages. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
       "assistant"
     );
     for (const m of history) {
@@ -944,69 +945,58 @@ function mount() {
     }
 
     try {
-      if (provider === "huggingface") {
-        // Бесплатный Hugging Face API с автоматическим переключением на запасную модель
-        let response;
-        let data;
-        let usedUrl = API_CONFIG.baseUrl;
+      if (provider === "groq") {
+        // Бесплатный Groq API с поддержкой CORS
+        const response = await fetch(API_CONFIG.groqUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${providerKey || "gsk_demo"}`
+          },
+          body: JSON.stringify({
+            model: "llama3-8b-8192",
+            messages: messages,
+            max_tokens: 700,
+            temperature: 0.4,
+            top_p: 0.9
+          })
+        });
 
-        try {
-          response = await fetch(usedUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(providerKey ? { "Authorization": `Bearer ${providerKey}` } : {})
-            },
-            body: JSON.stringify({
-              inputs: messages[messages.length - 1].content,
-              parameters: {
-                max_new_tokens: 700,
-                temperature: 0.4,
-                top_p: 0.9,
-                return_full_text: false
-              }
-            })
-          });
-
-          if (!response.ok) {
-            // Пробуем запасную модель если основная недоступна
-            console.log("Основная модель недоступна, пробуем запасную...");
-            usedUrl = API_CONFIG.fallbackUrl;
-            response = await fetch(usedUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(providerKey ? { "Authorization": `Bearer ${providerKey}` } : {})
-              },
-              body: JSON.stringify({
-                inputs: messages[messages.length - 1].content,
-                parameters: {
-                  max_new_tokens: 700,
-                  temperature: 0.4,
-                  top_p: 0.9,
-                  return_full_text: false
-                }
-              })
-            });
-          }
-
-          if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Hugging Face API error: ${response.status} - ${error}`);
-          }
-
-          data = await response.json();
-          if (Array.isArray(data) && data[0]?.generated_text) {
-            return data[0].generated_text;
-          } else if (data?.generated_text) {
-            return data.generated_text;
-          } else {
-            throw new Error("Неожиданный формат ответа от API");
-          }
-        } catch (error) {
-          console.error("Hugging Face API Error:", error);
-          throw new Error(`Бесплатный API暂时 недоступен. Попробуйте позже или используйте платный API с ключом.`);
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Groq API error: ${response.status} - ${error}`);
         }
+
+        const data = await response.json();
+        return data?.choices?.[0]?.message?.content || "";
+      } else if (provider === "together") {
+        // Together AI API
+        if (!providerKey) {
+          throw new Error("Для Together AI нужен API ключ. Получите бесплатный на https://together.ai/");
+        }
+
+        const response = await fetch(API_CONFIG.togetherUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${providerKey}`
+          },
+          body: JSON.stringify({
+            model: "meta-llama/Llama-3-8b-chat-hf",
+            messages: messages,
+            max_tokens: 700,
+            temperature: 0.4,
+            top_p: 0.9
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Together AI error: ${response.status} - ${error}`);
+        }
+
+        const data = await response.json();
+        return data?.choices?.[0]?.message?.content || "";
       } else if (provider === "yandex") {
         // YandexGPT API
         const response = await fetch(API_CONFIG.alternativeUrl, {
@@ -1060,8 +1050,15 @@ function mount() {
         return false;
       }
 
-      setStatus(`Готов · ${provider === "huggingface" ? "Hugging Face" : "YandexGPT"}`);
-      addMsg(`Подключено к ${provider === "huggingface" ? "Hugging Face (бесплатно)" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
+      if (provider === "together" && !apiKey) {
+        apiKeySection.classList.add("show");
+        setStatus("Нужен API ключ для Together AI");
+        addMsg("Для использования Together AI введите бесплатный API ключ в настройках (кнопка ⚙️). Получить ключ можно на https://together.ai/", "assistant", "error");
+        return false;
+      }
+
+      setStatus(`Готов · ${provider === "groq" ? "Groq (бесплатно)" : provider === "together" ? "Together AI" : "YandexGPT"}`);
+      addMsg(`Подключено к ${provider === "groq" ? "Groq (бесплатно и быстро)" : provider === "together" ? "Together AI" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
       return true;
     } catch (err) {
       console.error(err);
@@ -1144,7 +1141,8 @@ function mount() {
       if (!/источник/i.test(reply)) addSources(retrieval.sources);
     }
 
-    setStatus(`Готов · ${modelSelect.value === "huggingface" ? "Hugging Face" : "YandexGPT"}`);
+    const provider = modelSelect.value;
+    setStatus(`Готов · ${provider === "groq" ? "Groq" : provider === "together" ? "Together AI" : "YandexGPT"}`);
     setBusyUI(false);
     sendBtn.disabled = false;
     input.focus();
@@ -1189,7 +1187,7 @@ function mount() {
   modelSelect.addEventListener("change", () => {
     currentProvider = modelSelect.value;
     localStorage.setItem(LS_API_PROVIDER, currentProvider);
-    if (currentProvider === "yandex") {
+    if (currentProvider === "yandex" || currentProvider === "together") {
       apiKeySection.classList.add("show");
       loadApiKey();
     } else {
