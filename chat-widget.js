@@ -4,10 +4,10 @@
 
 // Конфигурация для работы с облачным API
 const API_CONFIG = {
-  // Используем бесплатный Groq API (поддерживает CORS, быстро, качественно)
+  // Публичный Hugging Face API без ключа
+  publicHuggingFace: "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
+  // Groq API для альтернативы (нужен ключ)
   groqUrl: "https://api.groq.com/openai/v1/chat/completions",
-  // Fallback на Together AI (тоже бесплатный tier)
-  togetherUrl: "https://api.together.xyz/v1/chat/completions",
   // YandexGPT для платного варианта
   yandexUrl: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 };
