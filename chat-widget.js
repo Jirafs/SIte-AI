@@ -4,12 +4,14 @@
 /* ==================== ОБЛАЧНЫЙ API ==================== */
 
 const API_CONFIG = {
-  // Pollinations: бесплатно и без ключа, отдаёт Access-Control-Allow-Origin: *,
-  // поэтому запрос с github.io проходит. Формат — OpenAI-совместимый.
-  pollinationsUrl: "https://text.pollinations.ai/openai",
-  pollinationsModel: "openai-fast",
-  // Зеркало на случай, если основной хост недоступен.
-  pollinationsFallbackUrl: "https://text.pollinations.ai/openai",
+  // Several free API options with automatic fallback
+  freeAPIs: [
+    // Hugging Face Inference API (sometimes works without key)
+    { url: "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2", type: "huggingface" },
+    // Alternative Hugging Face models
+    { url: "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct", type: "huggingface" },
+    { url: "https://api-inference.huggingface.co/models/meta-llama/Llama-3.1-8B-Instruct", type: "huggingface" }
+  ],
   // Groq API для альтернативы (нужен ключ)
   groqUrl: "https://api.groq.com/openai/v1/chat/completions",
   // YandexGPT для платного варианта
@@ -762,7 +764,7 @@ function mount() {
       </div>
       <div class="ai-chat-modelbar">
         <select class="ai-model-select" aria-label="Выбор модели">
-          <option value="public">Pollinations (бесплатно, без ключа)</option>
+          <option value="public">Мульти-API (бесплатно, может быть медленно)</option>
           <option value="groq">Groq (нужен ключ)</option>
           <option value="yandex">YandexGPT (нужен ключ)</option>
         </select>
@@ -936,7 +938,7 @@ function mount() {
   function rerenderMessages() {
     messagesEl.innerHTML = "";
     addMsg(
-      "Привет! Я ИИ-навигатор по методичке. Работаю через бесплатный Pollinations API без ключей. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
+      "Привет! Я ИИ-навигатор по методичке. На GitHub Pages я работаю через бесплатные API (могут быть медленно). Для полной скорости и стабильности рекомендую локальный запуск через файл запустить.bat - там ИИ работает офлайн. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
       "assistant"
     );
     for (const m of history) {
@@ -961,52 +963,42 @@ function mount() {
 
     try {
       if (provider === "public") {
-        // Pollinations API - бесплатный и поддерживает CORS
-        try {
-          const response = await fetch(API_CONFIG.pollinationsUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              model: API_CONFIG.pollinationsModel,
-              messages: messages,
-              max_tokens: 700,
-              temperature: 0.4,
-              top_p: 0.9
-            })
-          });
+        // Пробуем несколько бесплатных API по очереди
+        for (const api of API_CONFIG.freeAPIs) {
+          try {
+            if (api.type === "huggingface") {
+              const response = await fetch(api.url, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  inputs: messages[messages.length - 1].content,
+                  parameters: {
+                    max_new_tokens: 700,
+                    temperature: 0.4,
+                    top_p: 0.9,
+                    return_full_text: false
+                  }
+                })
+              });
 
-          if (!response.ok) {
-            // Пробуем запасной URL
-            const fallbackResponse = await fetch(API_CONFIG.pollinationsFallbackUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                model: API_CONFIG.pollinationsModel,
-                messages: messages,
-                max_tokens: 700,
-                temperature: 0.4,
-                top_p: 0.9
-              })
-            });
-
-            if (!fallbackResponse.ok) {
-              throw new Error("Pollinations API недоступен");
+              if (response.ok) {
+                const data = await response.json();
+                if (Array.isArray(data) && data[0]?.generated_text) {
+                  return data[0].generated_text;
+                } else if (data?.generated_text) {
+                  return data.generated_text;
+                }
+              }
             }
-
-            const fallbackData = await fallbackResponse.json();
-            return fallbackData?.choices?.[0]?.message?.content || "";
+          } catch (error) {
+            console.log(`API ${api.url} failed, trying next...`);
+            continue;
           }
-
-          const data = await response.json();
-          return data?.choices?.[0]?.message?.content || "";
-        } catch (error) {
-          console.error("Pollinations API Error:", error);
-          throw new Error("Бесплатный API временно недоступен. Попробуйте позже или используйте API с ключом.");
         }
+
+        throw new Error("Все бесплатные API временно недоступны. Рекомендую использовать локальный запуск через файл запустить.bat - там ИИ работает офлайн и полностью бесплатно.");
       } else if (provider === "groq") {
         // Groq API
         if (!providerKey) {
@@ -1095,8 +1087,8 @@ function mount() {
         return false;
       }
 
-      setStatus(`Готов · ${provider === "public" ? "Pollinations" : provider === "groq" ? "Groq" : "YandexGPT"}`);
-      addMsg(`Подключено к ${provider === "public" ? "Pollinations (бесплатно)" : provider === "groq" ? "Groq" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
+      setStatus(`Готов · ${provider === "public" ? "Мульти-API" : provider === "groq" ? "Groq" : "YandexGPT"}`);
+      addMsg(`Подключено к ${provider === "public" ? "бесплатным API (могут быть медленно)" : provider === "groq" ? "Groq" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
       return true;
     } catch (err) {
       console.error(err);
@@ -1180,7 +1172,7 @@ function mount() {
     }
 
     const provider = modelSelect.value;
-    setStatus(`Готов · ${provider === "public" ? "Pollinations" : provider === "groq" ? "Groq" : "YandexGPT"}`);
+    setStatus(`Готов · ${provider === "public" ? "Мульти-API" : provider === "groq" ? "Groq" : "YandexGPT"}`);
     setBusyUI(false);
     sendBtn.disabled = false;
     input.focus();
