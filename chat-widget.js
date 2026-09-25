@@ -1,16 +1,31 @@
-// Убрали WebLLM для работы на GitHub Pages, используем облачный API
+// ИИ-навигатор работает через облачный API: на GitHub Pages локальная
+// модель (WebLLM) не запускается, поэтому ответ приходит извне.
 
 /* ==================== ОБЛАЧНЫЙ API ==================== */
 
-// Конфигурация для работы с облачным API
 const API_CONFIG = {
-  // Публичный Hugging Face API без ключа
-  publicHuggingFace: "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
+  // Pollinations: бесплатно и без ключа, отдаёт Access-Control-Allow-Origin: *,
+  // поэтому запрос с github.io проходит. Формат — OpenAI-совместимый.
+  pollinationsUrl: "https://text.pollinations.ai/openai",
+  pollinationsModel: "openai-fast",
+  // Зеркало на случай, если основной хост недоступен.
+  pollinationsFallbackUrl: "https://text.pollinations.ai/openai",
   // Groq API для альтернативы (нужен ключ)
   groqUrl: "https://api.groq.com/openai/v1/chat/completions",
   // YandexGPT для платного варианта
   yandexUrl: "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 };
+
+// Человекочитаемые имена провайдеров для статусной строки.
+const PROVIDER_LABELS = {
+  public: "Pollinations (бесплатно)",
+  groq: "Groq",
+  yandex: "YandexGPT",
+};
+
+function providerLabel(id) {
+  return PROVIDER_LABELS[id] || id || "облачный API";
+}
 
 const LS_API_KEY = "ai-navigator-api-key";
 
@@ -921,7 +936,7 @@ function mount() {
   function rerenderMessages() {
     messagesEl.innerHTML = "";
     addMsg(
-      "Привет! Я ИИ-навигатор по методичке. Для работы нужен бесплатный API ключ Together AI (получите за 1 минуту на https://together.ai/ - $25 бесплатных кредитов). Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
+      "Привет! Я ИИ-навигатор по методичке. Работаю через публичный API без ключей (бесплатно). Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
       "assistant"
     );
     for (const m of history) {
@@ -1055,29 +1070,22 @@ function mount() {
       const provider = modelSelect.value;
       localStorage.setItem(LS_API_PROVIDER, provider);
 
-      if (provider === "together" && !apiKey) {
-        apiKeySection.classList.add("show");
-        setStatus("Нужен бесплатный API ключ Together AI");
-        addMsg("Для Together AI нужен бесплатный API ключ. Получите его за 1 минуту: https://together.ai/ (даёт $25 бесплатных кредитов - хватит надолго). Введите ключ в настройках (кнопка ⚙️).", "assistant", "error");
-        return false;
-      }
-
-      if (provider === "groq" && !apiKey) {
+      if (provider === "public") {
+        // Публичный API работает без ключа - ничего не делаем
+      } else if (provider === "groq" && !apiKey) {
         apiKeySection.classList.add("show");
         setStatus("Нужен API ключ Groq");
         addMsg("Для Groq нужен бесплатный API ключ. Получите его на https://console.groq.com/ (очень быстро). Введите ключ в настройках (кнопка ⚙️).", "assistant", "error");
         return false;
-      }
-
-      if (provider === "yandex" && !apiKey) {
+      } else if (provider === "yandex" && !apiKey) {
         apiKeySection.classList.add("show");
         setStatus("Нужен API ключ для YandexGPT");
         addMsg("Для использования YandexGPT введите API ключ в настройках (кнопка ⚙️). Получить ключ можно на https://cloud.yandex.ru/", "assistant", "error");
         return false;
       }
 
-      setStatus(`Готов · ${provider === "groq" ? "Groq" : provider === "together" ? "Together AI" : "YandexGPT"}`);
-      addMsg(`Подключено к ${provider === "groq" ? "Groq" : provider === "together" ? "Together AI" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
+      setStatus(`Готов · ${provider === "public" ? "Публичный API" : provider === "groq" ? "Groq" : "YandexGPT"}`);
+      addMsg(`Подключено к ${provider === "public" ? "публичному API (бесплатно)" : provider === "groq" ? "Groq" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
       return true;
     } catch (err) {
       console.error(err);
@@ -1161,7 +1169,7 @@ function mount() {
     }
 
     const provider = modelSelect.value;
-    setStatus(`Готов · ${provider === "groq" ? "Groq" : provider === "together" ? "Together AI" : "YandexGPT"}`);
+    setStatus(`Готов · ${provider === "public" ? "Публичный API" : provider === "groq" ? "Groq" : "YandexGPT"}`);
     setBusyUI(false);
     sendBtn.disabled = false;
     input.focus();
@@ -1206,7 +1214,7 @@ function mount() {
   modelSelect.addEventListener("change", () => {
     currentProvider = modelSelect.value;
     localStorage.setItem(LS_API_PROVIDER, currentProvider);
-    if (currentProvider === "yandex" || currentProvider === "together") {
+    if (currentProvider === "yandex" || currentProvider === "groq") {
       apiKeySection.classList.add("show");
       loadApiKey();
     } else {
