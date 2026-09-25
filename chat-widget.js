@@ -762,7 +762,7 @@ function mount() {
       </div>
       <div class="ai-chat-modelbar">
         <select class="ai-model-select" aria-label="Выбор модели">
-          <option value="public">Публичный API (бесплатно, без ключа)</option>
+          <option value="public">Pollinations (бесплатно, без ключа)</option>
           <option value="groq">Groq (нужен ключ)</option>
           <option value="yandex">YandexGPT (нужен ключ)</option>
         </select>
@@ -936,7 +936,7 @@ function mount() {
   function rerenderMessages() {
     messagesEl.innerHTML = "";
     addMsg(
-      "Привет! Я ИИ-навигатор по методичке. Работаю через публичный API без ключей (бесплатно). Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
+      "Привет! Я ИИ-навигатор по методичке. Работаю через бесплатный Pollinations API без ключей. Могу подсказать, где лежит нужный промпт, разобрать работу по чек-листу и задать наводящие вопросы — но не решу задание за тебя.",
       "assistant"
     );
     for (const m of history) {
@@ -961,40 +961,51 @@ function mount() {
 
     try {
       if (provider === "public") {
-        // Публичный Hugging Face API без ключа
+        // Pollinations API - бесплатный и поддерживает CORS
         try {
-          const response = await fetch(API_CONFIG.publicHuggingFace, {
+          const response = await fetch(API_CONFIG.pollinationsUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json"
             },
             body: JSON.stringify({
-              inputs: messages[messages.length - 1].content,
-              parameters: {
-                max_new_tokens: 700,
-                temperature: 0.4,
-                top_p: 0.9,
-                return_full_text: false
-              }
+              model: API_CONFIG.pollinationsModel,
+              messages: messages,
+              max_tokens: 700,
+              temperature: 0.4,
+              top_p: 0.9
             })
           });
 
           if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Public API error: ${response.status} - ${error}`);
+            // Пробуем запасной URL
+            const fallbackResponse = await fetch(API_CONFIG.pollinationsFallbackUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model: API_CONFIG.pollinationsModel,
+                messages: messages,
+                max_tokens: 700,
+                temperature: 0.4,
+                top_p: 0.9
+              })
+            });
+
+            if (!fallbackResponse.ok) {
+              throw new Error("Pollinations API недоступен");
+            }
+
+            const fallbackData = await fallbackResponse.json();
+            return fallbackData?.choices?.[0]?.message?.content || "";
           }
 
           const data = await response.json();
-          if (Array.isArray(data) && data[0]?.generated_text) {
-            return data[0].generated_text;
-          } else if (data?.generated_text) {
-            return data.generated_text;
-          } else {
-            throw new Error("Неожиданный формат ответа от API");
-          }
+          return data?.choices?.[0]?.message?.content || "";
         } catch (error) {
-          console.error("Public API Error:", error);
-          throw new Error("Публичный API временно недоступен. Попробуйте позже.");
+          console.error("Pollinations API Error:", error);
+          throw new Error("Бесплатный API временно недоступен. Попробуйте позже или используйте API с ключом.");
         }
       } else if (provider === "groq") {
         // Groq API
@@ -1084,8 +1095,8 @@ function mount() {
         return false;
       }
 
-      setStatus(`Готов · ${provider === "public" ? "Публичный API" : provider === "groq" ? "Groq" : "YandexGPT"}`);
-      addMsg(`Подключено к ${provider === "public" ? "публичному API (бесплатно)" : provider === "groq" ? "Groq" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
+      setStatus(`Готов · ${provider === "public" ? "Pollinations" : provider === "groq" ? "Groq" : "YandexGPT"}`);
+      addMsg(`Подключено к ${provider === "public" ? "Pollinations (бесплатно)" : provider === "groq" ? "Groq" : "YandexGPT"}. Спрашивайте по методичке.`, "assistant");
       return true;
     } catch (err) {
       console.error(err);
@@ -1169,7 +1180,7 @@ function mount() {
     }
 
     const provider = modelSelect.value;
-    setStatus(`Готов · ${provider === "public" ? "Публичный API" : provider === "groq" ? "Groq" : "YandexGPT"}`);
+    setStatus(`Готов · ${provider === "public" ? "Pollinations" : provider === "groq" ? "Groq" : "YandexGPT"}`);
     setBusyUI(false);
     sendBtn.disabled = false;
     input.focus();
